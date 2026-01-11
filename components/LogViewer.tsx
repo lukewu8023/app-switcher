@@ -41,9 +41,9 @@ export const LogViewer: React.FC<LogViewerProps> = ({ logs }) => {
       </div>
 
       {/* Log Content */}
-      <div 
+      <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto px-4 pb-4 font-mono text-xs sm:text-sm space-y-1 no-scrollbar"
+        className="flex-1 overflow-y-auto px-4 pb-4 font-mono text-xs sm:text-sm space-y-1 no-scrollbar select-text"
       >
         {logs.length === 0 ? (
           <div className="text-slate-500 italic p-2 text-center">No logs available. Ready to start.</div>
