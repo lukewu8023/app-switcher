@@ -1,0 +1,4 @@
+{
+  "name": "AppSwitcher",
+  "description": "A PWA-enabled utility to manage and switch local web applications running on a shared port."
+}
