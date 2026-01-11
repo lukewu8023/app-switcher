@@ -3,7 +3,7 @@ import { AVAILABLE_APPS, STORAGE_KEY_USAGE } from './constants';
 import { AppConfig, AppStatus, LogEntry, UsageStats } from './types';
 import { AppCard } from './components/AppCard';
 import { LogViewer } from './components/LogViewer';
-import { startApplicationProcess, stopApplicationProcess, killPort4000 } from './services/switcherService';
+import { startApplicationProcess, stopApplicationProcess, killPort4000, getStatus, subscribeToLogs } from './services/switcherService';
 
 const App: React.FC = () => {
   // State
@@ -28,6 +28,42 @@ const App: React.FC = () => {
     if (sortedApps.length > 0) {
       setSelectedAppId(sortedApps[0].id);
     }
+  }, []);
+
+  // Sync state with backend on mount
+  useEffect(() => {
+    const initializeState = async () => {
+      try {
+        const serverStatus = await getStatus();
+        if (serverStatus.running && serverStatus.appId) {
+          setRunningAppId(serverStatus.appId);
+          setStatus(AppStatus.RUNNING);
+          setSelectedAppId(serverStatus.appId);
+        }
+      } catch (error) {
+        console.error('Failed to fetch initial status:', error);
+      }
+    };
+    initializeState();
+  }, []);
+
+  // Subscribe to log stream on mount
+  useEffect(() => {
+    const handleLog = (log: LogEntry) => {
+      setLogs(prev => {
+        // Deduplicate by message + close timestamp
+        const isDuplicate = prev.some(
+          existing =>
+            existing.message === log.message &&
+            Math.abs(existing.timestamp.getTime() - log.timestamp.getTime()) < 1000
+        );
+        if (isDuplicate) return prev;
+        return [...prev.slice(-99), log];
+      });
+    };
+
+    const cleanup = subscribeToLogs(handleLog);
+    return cleanup;
   }, []);
 
   const addLog = useCallback((message: string, type: 'info' | 'error' | 'system' = 'info') => {
@@ -71,9 +107,9 @@ const App: React.FC = () => {
       await killPort4000();
       addLog('Port 4000 cleared.', 'system');
 
-      // Start new app
+      // Start new app (logs will come via SSE subscription)
       incrementUsage(app.id);
-      await startApplicationProcess(app, (log) => setLogs(prev => [...prev, log]));
+      await startApplicationProcess(app);
 
       setRunningAppId(selectedAppId);
       setStatus(AppStatus.RUNNING);
@@ -111,6 +147,15 @@ const App: React.FC = () => {
 
   // STOP button is enabled when: app is running AND selected app is the running app
   const canStop = status === AppStatus.RUNNING && selectedAppId === runningAppId;
+
+  // Display status for the selected app (not the global status)
+  const displayStatus = (status === AppStatus.STARTING || status === AppStatus.STOPPING)
+    ? status  // Show STARTING/STOPPING during transitions
+    : (selectedAppId === runningAppId && status === AppStatus.RUNNING)
+      ? AppStatus.RUNNING
+      : status === AppStatus.ERROR
+        ? AppStatus.ERROR
+        : AppStatus.STOPPED;
 
   return (
     <div className="relative h-[100dvh] w-full bg-slate-950 text-white overflow-hidden flex flex-col">
@@ -150,12 +195,12 @@ const App: React.FC = () => {
             <div className="mb-4 flex flex-col items-center animate-fade-in-up">
               <div className="text-slate-400 text-sm mb-1">Target Status</div>
               <div className={`text-2xl font-black tracking-tight flex items-center gap-3
-                ${status === AppStatus.RUNNING ? 'text-green-400' : 
-                  status === AppStatus.STOPPED ? 'text-slate-500' :
-                  status === AppStatus.ERROR ? 'text-red-500' : 'text-yellow-400'}
+                ${displayStatus === AppStatus.RUNNING ? 'text-green-400' :
+                  displayStatus === AppStatus.STOPPED ? 'text-slate-500' :
+                  displayStatus === AppStatus.ERROR ? 'text-red-500' : 'text-yellow-400'}
               `}>
-                 {status === AppStatus.RUNNING && <div className="w-3 h-3 bg-green-400 rounded-full animate-pulse shadow-[0_0_10px_#4ade80]"/>}
-                 {status}
+                 {displayStatus === AppStatus.RUNNING && <div className="w-3 h-3 bg-green-400 rounded-full animate-pulse shadow-[0_0_10px_#4ade80]"/>}
+                 {displayStatus}
               </div>
               {selectedApp && (
                 <div className="mt-2 px-3 py-1 bg-slate-900 rounded-full text-xs text-slate-500 border border-slate-800">

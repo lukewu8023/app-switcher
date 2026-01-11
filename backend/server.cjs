@@ -13,7 +13,24 @@ let currentAppId = null;
 // SSE clients for log streaming
 const sseClients = [];
 
+// Log buffer for persistence (stores last 200 entries)
+const LOG_BUFFER_SIZE = 200;
+const logBuffer = [];
+
+function addToLogBuffer(logEntry) {
+  logBuffer.push({
+    ...logEntry,
+    timestamp: Date.now()
+  });
+  if (logBuffer.length > LOG_BUFFER_SIZE) {
+    logBuffer.shift();
+  }
+}
+
 function sendSSE(data) {
+  // Store in buffer for new clients
+  addToLogBuffer(data);
+
   const message = `data: ${JSON.stringify(data)}\n\n`;
   sseClients.forEach(client => {
     client.write(message);
@@ -184,6 +201,11 @@ const server = http.createServer(async (req, res) => {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       'Connection': 'keep-alive'
+    });
+
+    // Send buffered logs to new client
+    logBuffer.forEach(log => {
+      res.write(`data: ${JSON.stringify(log)}\n\n`);
     });
 
     sseClients.push(res);
