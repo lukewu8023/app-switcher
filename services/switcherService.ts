@@ -1,49 +1,88 @@
 import { AppConfig, LogEntry } from '../types';
 
-// In a real application, these functions would fetch() to a local Node.js/Python server
-// that executes shell commands (e.g., `kill $(lsof -t -i:4000)` and `npm start`).
+const API_BASE = `http://${window.location.hostname}:3001`;
 
-const MOCK_DELAY = 1500;
+let eventSource: EventSource | null = null;
 
 export const killPort4000 = async (): Promise<void> => {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      console.log('Backend: Killed process on port 4000');
-      resolve();
-    }, 1000);
+  const response = await fetch(`${API_BASE}/api/kill-port`, {
+    method: 'POST'
   });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to kill port 4000');
+  }
 };
 
 export const startApplicationProcess = async (
-  app: AppConfig, 
+  app: AppConfig,
   onLog: (log: LogEntry) => void
 ): Promise<void> => {
+  // Set up SSE connection for log streaming
   return new Promise((resolve, reject) => {
-    // Simulate startup sequence
-    onLog({ id: crypto.randomUUID(), timestamp: new Date(), message: `Initializing ${app.name}...`, type: 'system' });
-    
-    setTimeout(() => {
-      onLog({ id: crypto.randomUUID(), timestamp: new Date(), message: `> cd ${app.folderPath}`, type: 'info' });
-      onLog({ id: crypto.randomUUID(), timestamp: new Date(), message: `> npm run start -- --port 4000`, type: 'info' });
-    }, 500);
+    // Close any existing connection
+    if (eventSource) {
+      eventSource.close();
+    }
 
-    setTimeout(() => {
-      if (Math.random() > 0.95) {
-        // Random failure simulation
-        reject(new Error('EADDRINUSE: Port 4000 is still busy (Race condition simulated)'));
-      } else {
-        onLog({ id: crypto.randomUUID(), timestamp: new Date(), message: `Server ready at http://localhost:4000`, type: 'info' });
-        onLog({ id: crypto.randomUUID(), timestamp: new Date(), message: `[HMR] connected`, type: 'system' });
-        resolve();
+    eventSource = new EventSource(`${API_BASE}/api/logs`);
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        const log: LogEntry = {
+          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          timestamp: new Date(),
+          message: data.message,
+          type: data.type || 'info'
+        };
+        onLog(log);
+      } catch (e) {
+        console.error('Failed to parse log:', e);
       }
-    }, MOCK_DELAY);
+    };
+
+    eventSource.onerror = () => {
+      // SSE connection error - this is normal when server restarts
+      console.log('SSE connection error or closed');
+    };
+
+    // Start the app via API
+    fetch(`${API_BASE}/api/start`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ appId: app.id })
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const error = await response.json();
+          reject(new Error(error.error || 'Failed to start application'));
+        } else {
+          resolve();
+        }
+      })
+      .catch((error) => {
+        reject(error);
+      });
   });
 };
 
 export const stopApplicationProcess = async (): Promise<void> => {
-  return new Promise((resolve) => {
-     setTimeout(() => {
-      resolve();
-    }, 800);
+  // Close SSE connection
+  if (eventSource) {
+    eventSource.close();
+    eventSource = null;
+  }
+
+  const response = await fetch(`${API_BASE}/api/stop`, {
+    method: 'POST'
   });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to stop application');
+  }
 };

@@ -1,20 +1,76 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# App Switcher
 
-# Run and deploy your AI Studio app
+A simple dashboard to switch between and manage multiple applications. Each app runs on port 4000, and you can easily switch between them with a single click.
 
-This contains everything you need to run your app locally.
+## Features
 
-View your app in AI Studio: https://ai.studio/apps/drive/1m_XtDVwKYOotoiKalsT2u7frXHjd-J9h
+- **App Selection**: Browse and select from available applications
+- **One-Click Start/Stop**: Start or stop apps with large, easy-to-use buttons
+- **Auto-Switch**: When starting a different app, the running app is automatically stopped
+- **Log Streaming**: View real-time logs from the running application
+- **Usage Tracking**: Frequently used apps are sorted to the top
 
-## Run Locally
+## Getting Started
 
-**Prerequisites:**  Node.js
+### Prerequisites
 
+- Node.js
+- Applications to manage (configured in `constants.ts`)
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+### Installation
+
+```bash
+npm install
+```
+
+### Running
+
+```bash
+npm run dev
+```
+
+This starts both the backend (port 3001) and frontend (port 3000).
+
+### Access
+
+Open your browser at:
+- `http://localhost:3000`
+- Or your local IP: `http://192.168.x.x:3000`
+
+## Configuration
+
+Add or modify apps in `constants.ts`:
+
+```typescript
+export const AVAILABLE_APPS: AppConfig[] = [
+  {
+    id: 'my-app',
+    name: 'My Application',
+    description: 'Description of the app',
+    folderPath: '../path/to/app'
+  }
+];
+```
+
+## Architecture
+
+- **Frontend**: React + TypeScript + Vite
+- **Backend**: Node.js Express-like server
+- **Port**: Apps run on port 4000
+- **API**: REST API on port 3001 with SSE for log streaming
+
+## Project Structure
+
+```
+app-switcher/
+├── App.tsx              # Main React component
+├── constants.ts         # App configuration
+├── types.ts             # TypeScript interfaces
+├── services/
+│   └── switcherService.ts  # API client
+├── components/
+│   ├── AppCard.ts       # App selection card
+│   └── LogViewer.ts     # Log display panel
+└── backend/
+    └── server.cjs       # Backend server
+```

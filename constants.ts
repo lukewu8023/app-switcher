@@ -6,28 +6,16 @@ import { AppConfig } from './types';
 
 export const AVAILABLE_APPS: AppConfig[] = [
   {
-    id: 'app-ecommerce',
-    name: 'E-Commerce Store',
-    description: 'The main customer-facing mobile shopping application.',
-    folderPath: './application-1'
+    id: 'claudecodeui',
+    name: 'Claude Code UI',
+    description: "Use Claude Code, Cursor CLI or Codex on mobile and web with CloudCLI (aka Claude Code UI). CloudCLI is a free open source webui/GUI that helps you manage your Claude Code session and projects remotely",
+    folderPath: '../claudecodeui'
   },
   {
-    id: 'app-admin-panel',
-    name: 'Admin Dashboard',
-    description: 'Internal tool for managing orders, inventory, and users.',
-    folderPath: './application-2'
-  },
-  {
-    id: 'app-driver-logistics',
-    name: 'Logistics Driver',
-    description: 'Minimalist app for delivery drivers to track routes.',
-    folderPath: './application-3'
-  },
-  {
-    id: 'app-analytics-viz',
-    name: 'Data Viz Server',
-    description: 'Heavy d3.js visualization server for nightly reports.',
-    folderPath: './application-4'
+    id: 'agent-ui',
+    name: 'Agent Management UI',
+    description: "New generation of UI for managing agents",
+    folderPath: '../agent-ui'
   }
 ];
 

@@ -9,6 +9,7 @@ const App: React.FC = () => {
   // State
   const [apps, setApps] = useState<AppConfig[]>([]);
   const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
+  const [runningAppId, setRunningAppId] = useState<string | null>(null); // Track which app is actually running
   const [status, setStatus] = useState<AppStatus>(AppStatus.STOPPED);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   
@@ -31,7 +32,7 @@ const App: React.FC = () => {
 
   const addLog = useCallback((message: string, type: 'info' | 'error' | 'system' = 'info') => {
     const entry: LogEntry = {
-      id: crypto.randomUUID(),
+      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       timestamp: new Date(),
       message,
       type
@@ -54,22 +55,33 @@ const App: React.FC = () => {
 
     try {
       setStatus(AppStatus.STARTING);
+
+      // Stop currently running app if different
+      if (runningAppId && runningAppId !== selectedAppId) {
+        addLog('Stopping previous application...', 'system');
+        await stopApplicationProcess();
+        await killPort4000();
+        addLog('Previous application stopped.', 'system');
+      }
+
       addLog(`Initiating sequence for ${app.name}...`, 'system');
 
-      // Step 1: Force kill port 4000
+      // Force kill port 4000
       addLog('Scanning port 4000...', 'system');
       await killPort4000();
       addLog('Port 4000 cleared.', 'system');
 
-      // Step 2: Start new app
+      // Start new app
       incrementUsage(app.id);
       await startApplicationProcess(app, (log) => setLogs(prev => [...prev, log]));
-      
+
+      setRunningAppId(selectedAppId);
       setStatus(AppStatus.RUNNING);
       addLog(`${app.name} is now RUNNING on port 4000.`, 'system');
 
     } catch (error: any) {
       setStatus(AppStatus.ERROR);
+      setRunningAppId(null);
       addLog(`Failed to start: ${error.message || 'Unknown error'}`, 'error');
     }
   };
@@ -82,6 +94,7 @@ const App: React.FC = () => {
       addLog('Stopping current process...', 'system');
       await stopApplicationProcess();
       await killPort4000();
+      setRunningAppId(null);
       setStatus(AppStatus.STOPPED);
       addLog('Application stopped. Port 4000 is free.', 'system');
     } catch (error: any) {
@@ -91,6 +104,13 @@ const App: React.FC = () => {
   };
 
   const selectedApp = useMemo(() => apps.find(a => a.id === selectedAppId), [apps, selectedAppId]);
+
+  // START button is enabled when: not busy AND (nothing running OR selected app is different from running)
+  const canStart = status !== AppStatus.STARTING && status !== AppStatus.STOPPING &&
+    (status === AppStatus.STOPPED || status === AppStatus.ERROR || selectedAppId !== runningAppId);
+
+  // STOP button is enabled when: app is running AND selected app is the running app
+  const canStop = status === AppStatus.RUNNING && selectedAppId === runningAppId;
 
   return (
     <div className="relative h-[100dvh] w-full bg-slate-950 text-white overflow-hidden flex flex-col">
@@ -109,19 +129,14 @@ const App: React.FC = () => {
             {/* Carousel Container */}
             <div className="flex overflow-x-auto snap-x snap-mandatory px-[10vw] no-scrollbar pb-4">
               {apps.map(app => (
-                <AppCard 
-                  key={app.id} 
-                  app={app} 
-                  isSelected={selectedAppId === app.id} 
+                <AppCard
+                  key={app.id}
+                  app={app}
+                  isSelected={selectedAppId === app.id}
                   onClick={() => {
-                    if (status === AppStatus.STOPPED || status === AppStatus.ERROR) {
-                      setSelectedAppId(app.id);
-                      setLogs([]); // Clear logs when switching context
-                    } else {
-                       if(selectedAppId !== app.id) {
-                         addLog("Stop the current application before switching.", "error");
-                       }
-                    }
+                    if (selectedAppId === app.id) return; // Already selected
+                    if (status === AppStatus.STARTING || status === AppStatus.STOPPING) return; // Busy
+                    setSelectedAppId(app.id);
                   }} 
                 />
               ))}
@@ -150,16 +165,16 @@ const App: React.FC = () => {
             </div>
 
             {/* Big Buttons */}
-            <div className="flex gap-6 sm:gap-8 items-center">
+            <div className="flex gap-6 sm:gap-8 items-center relative z-[60]">
               {/* STOP Button */}
               <button
                 onClick={handleStop}
-                disabled={status === AppStatus.STOPPED || status === AppStatus.STARTING}
+                disabled={!canStop}
                 className={`
                   w-28 h-28 sm:w-32 sm:h-32 rounded-full flex flex-col items-center justify-center
                   border-4 transition-all duration-300 shadow-2xl shrink-0
-                  ${status === AppStatus.RUNNING 
-                    ? 'bg-red-500/10 border-red-500 text-red-500 hover:bg-red-500 hover:text-white hover:scale-105 cursor-pointer' 
+                  ${canStop
+                    ? 'bg-red-500/10 border-red-500 text-red-500 hover:bg-red-500 hover:text-white hover:scale-105 cursor-pointer'
                     : 'bg-slate-900 border-slate-800 text-slate-700 opacity-50 cursor-not-allowed'
                   }
                 `}
@@ -174,12 +189,12 @@ const App: React.FC = () => {
               {/* START Button */}
               <button
                 onClick={handleStart}
-                disabled={status === AppStatus.RUNNING || status === AppStatus.STARTING || status === AppStatus.STOPPING}
+                disabled={!canStart}
                 className={`
                   w-32 h-32 sm:w-36 sm:h-36 rounded-full flex flex-col items-center justify-center
                   border-4 transition-all duration-300 shadow-[0_0_40px_rgba(74,222,128,0.2)] shrink-0
-                  ${status === AppStatus.STOPPED || status === AppStatus.ERROR
-                    ? 'bg-green-500 text-white border-green-400 hover:scale-110 cursor-pointer hover:shadow-[0_0_60px_rgba(74,222,128,0.4)]' 
+                  ${canStart
+                    ? 'bg-green-500 text-white border-green-400 hover:scale-110 cursor-pointer hover:shadow-[0_0_60px_rgba(74,222,128,0.4)]'
                     : 'bg-slate-900 border-slate-800 text-slate-700 opacity-50 cursor-not-allowed'
                   }
                 `}

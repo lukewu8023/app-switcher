@@ -22,14 +22,14 @@ export const LogViewer: React.FC<LogViewerProps> = ({ logs }) => {
   // or use CSS clamping. Here we rely on container height + overflow hidden.
   
   return (
-    <div 
+    <div
       className={`
-        fixed bottom-0 left-0 right-0 
-        bg-slate-900 border-t border-slate-700 
+        fixed bottom-0 left-0 right-0
+        bg-slate-900 border-t border-slate-700
         shadow-[0_-5px_20px_rgba(0,0,0,0.5)]
         transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]
-        z-50 flex flex-col
-        ${isExpanded ? 'h-[90vh] rounded-t-xl' : 'h-[140px]'}
+        z-[70] flex flex-col
+        ${isExpanded ? 'h-[calc(100dvh-100px)] rounded-t-xl' : 'h-[140px]'}
       `}
     >
       {/* Handle / Header */}
