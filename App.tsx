@@ -101,7 +101,7 @@ const App: React.FC = () => {
         <div className="flex flex-col min-h-full">
           
           {/* Header / App Selector */}
-          <div className="pt-6 pb-2 px-0 shrink-0">
+          <div className="pt-[100px] pb-2 px-0 shrink-0">
             <h1 className="text-center text-xs font-bold uppercase tracking-widest text-slate-500 mb-3">
               Select Application
             </h1>
