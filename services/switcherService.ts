@@ -54,7 +54,11 @@ export const startApplicationProcess = async (
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ appId: app.id })
+      body: JSON.stringify({
+        appId: app.id,
+        startCommand: app.startCommand || 'npm run dev',
+        folderPath: app.folderPath
+      })
     })
       .then(async (response) => {
         if (!response.ok) {

@@ -1,9 +1,10 @@
 const http = require('http');
 const { spawn, exec } = require('child_process');
 const path = require('path');
+const os = require('os');
 
 const PORT = 3001;
-const APP_BASE_PATH = '/Users/luke/Lab';
+const isWindows = os.platform() === 'win32';
 
 // Store the current running process
 let currentProcess = null;
@@ -21,10 +22,17 @@ function sendSSE(data) {
 
 function killPort4000() {
   return new Promise((resolve) => {
-    exec('lsof -ti:4000 | xargs kill -9 2>/dev/null || true', (error) => {
-      // We don't care about errors here - port might already be free
-      resolve();
-    });
+    if (isWindows) {
+      // Windows: find and kill process on port 4000
+      exec('for /f "tokens=5" %a in (\'netstat -aon ^| findstr :4000 ^| findstr LISTENING\') do taskkill /F /PID %a', { shell: 'cmd.exe' }, (error) => {
+        resolve();
+      });
+    } else {
+      // Unix/Mac
+      exec('lsof -ti:4000 | xargs kill -9 2>/dev/null || true', (error) => {
+        resolve();
+      });
+    }
   });
 }
 
@@ -32,7 +40,7 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function startApp(appId) {
+async function startApp(appId, startCommand, folderPath) {
   // If there's a current process, kill it
   if (currentProcess) {
     currentProcess.kill('SIGTERM');
@@ -46,16 +54,25 @@ async function startApp(appId) {
   // Wait for port to be fully released
   await sleep(500);
 
-  const appPath = path.join(APP_BASE_PATH, appId);
+  // Resolve the app path relative to the backend directory
+  const backendDir = __dirname;
+  const appPath = path.resolve(backendDir, '..', folderPath);
 
   sendSSE({ type: 'system', message: `Starting ${appId}...` });
   sendSSE({ type: 'info', message: `> cd ${appPath}` });
-  sendSSE({ type: 'info', message: `> node server.js` });
+  sendSSE({ type: 'info', message: `> ${startCommand}` });
 
   return new Promise((resolve, reject) => {
-    const proc = spawn('node', ['server.js'], {
+    // Parse the start command
+    const parts = startCommand.split(' ');
+    const cmd = parts[0];
+    const args = parts.slice(1);
+
+    // On Windows, use shell to run npm commands properly
+    const proc = spawn(cmd, args, {
       cwd: appPath,
-      stdio: ['ignore', 'pipe', 'pipe']
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: isWindows
     });
 
     currentProcess = proc;
@@ -67,8 +84,14 @@ async function startApp(appId) {
       const message = data.toString().trim();
       if (message) {
         sendSSE({ type: 'info', message });
-        // Resolve when we see the "running at" message
-        if (!hasResolved && message.includes('running at')) {
+        // Resolve when we see common server ready patterns
+        if (!hasResolved && (
+          message.includes('running at') ||
+          message.includes('ready in') ||
+          message.includes('Server URL:') ||
+          message.includes('localhost:4000') ||
+          message.includes('Server - Ready')
+        )) {
           hasResolved = true;
           sendSSE({ type: 'system', message: `Server ready at http://localhost:4000` });
           resolve();
@@ -196,7 +219,10 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      await startApp(body.appId);
+      const startCommand = body.startCommand || 'npm run dev';
+      const folderPath = body.folderPath || `../${body.appId}`;
+
+      await startApp(body.appId, startCommand, folderPath);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true }));
     } catch (error) {

@@ -9,13 +9,15 @@ export const AVAILABLE_APPS: AppConfig[] = [
     id: 'claudecodeui',
     name: 'Claude Code UI',
     description: "Use Claude Code, Cursor CLI or Codex on mobile and web with CloudCLI (aka Claude Code UI). CloudCLI is a free open source webui/GUI that helps you manage your Claude Code session and projects remotely",
-    folderPath: '../claudecodeui'
+    folderPath: '../claudecodeui',
+    startCommand: 'npm run dev'
   },
   {
     id: 'agent-ui',
     name: 'Agent Management UI',
     description: "New generation of UI for managing agents",
-    folderPath: '../agent-ui'
+    folderPath: '../agent-ui',
+    startCommand: 'npm run dev'
   }
 ];
 
