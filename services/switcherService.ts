@@ -9,12 +9,27 @@ export interface ServerStatus {
   appId: string | null;
 }
 
+export interface StartStopResult {
+  success: boolean;
+  needsConfirmation?: boolean;
+  reason?: string;
+}
+
 export const getStatus = async (): Promise<ServerStatus> => {
   const response = await fetch(`${API_BASE}/api/status`);
   if (!response.ok) {
     throw new Error('Failed to fetch status');
   }
   return response.json();
+};
+
+// Callback for confirmation requests
+let onConfirmCallback: ((message: string, action: string) => void) | null = null;
+
+export const setOnConfirmCallback = (
+  callback: ((message: string, action: string) => void) | null
+) => {
+  onConfirmCallback = callback;
 };
 
 export const subscribeToLogs = (
@@ -30,6 +45,13 @@ export const subscribeToLogs = (
   eventSource.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
+
+      // Handle confirmation requests
+      if (data.type === 'confirm' && onConfirmCallback) {
+        onConfirmCallback(data.message, data.action);
+        return;
+      }
+
       const log: LogEntry = {
         id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         timestamp: data.timestamp ? new Date(data.timestamp) : new Date(),
@@ -55,8 +77,9 @@ export const subscribeToLogs = (
   };
 };
 
-export const killPort4000 = async (): Promise<void> => {
-  const response = await fetch(`${API_BASE}/api/kill-port`, {
+export const killPort4000 = async (force: boolean = false): Promise<void> => {
+  const url = force ? `${API_BASE}/api/kill-port?force=true` : `${API_BASE}/api/kill-port`;
+  const response = await fetch(url, {
     method: 'POST'
   });
 
@@ -66,9 +89,20 @@ export const killPort4000 = async (): Promise<void> => {
   }
 };
 
+export const forceKillProcess = async (): Promise<void> => {
+  const response = await fetch(`${API_BASE}/api/force-kill-process`, {
+    method: 'POST'
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to force kill process');
+  }
+};
+
 export const startApplicationProcess = async (
   app: AppConfig
-): Promise<void> => {
+): Promise<StartStopResult> => {
   const response = await fetch(`${API_BASE}/api/start`, {
     method: 'POST',
     headers: {
@@ -81,19 +115,25 @@ export const startApplicationProcess = async (
     })
   });
 
+  const result = await response.json();
+
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to start application');
+    throw new Error(result.error || 'Failed to start application');
   }
+
+  return result;
 };
 
-export const stopApplicationProcess = async (): Promise<void> => {
+export const stopApplicationProcess = async (): Promise<StartStopResult> => {
   const response = await fetch(`${API_BASE}/api/stop`, {
     method: 'POST'
   });
 
+  const result = await response.json();
+
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to stop application');
+    throw new Error(result.error || 'Failed to stop application');
   }
+
+  return result;
 };

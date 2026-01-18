@@ -3,7 +3,13 @@ import { AVAILABLE_APPS, STORAGE_KEY_USAGE } from './constants';
 import { AppConfig, AppStatus, LogEntry, UsageStats } from './types';
 import { AppCard } from './components/AppCard';
 import { LogViewer } from './components/LogViewer';
-import { startApplicationProcess, stopApplicationProcess, killPort4000, getStatus, subscribeToLogs } from './services/switcherService';
+import { startApplicationProcess, stopApplicationProcess, killPort4000, getStatus, subscribeToLogs, forceKillProcess, setOnConfirmCallback } from './services/switcherService';
+
+interface ConfirmDialog {
+  show: boolean;
+  message: string;
+  action: string;
+}
 
 const App: React.FC = () => {
   // State
@@ -12,6 +18,7 @@ const App: React.FC = () => {
   const [runningAppId, setRunningAppId] = useState<string | null>(null); // Track which app is actually running
   const [status, setStatus] = useState<AppStatus>(AppStatus.STOPPED);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialog>({ show: false, message: '', action: '' });
   
   // Initialization: Load config and sort by frequency
   useEffect(() => {
@@ -62,8 +69,16 @@ const App: React.FC = () => {
       });
     };
 
+    // Set up confirmation callback
+    setOnConfirmCallback((message: string, action: string) => {
+      setConfirmDialog({ show: true, message, action });
+    });
+
     const cleanup = subscribeToLogs(handleLog);
-    return cleanup;
+    return () => {
+      cleanup();
+      setOnConfirmCallback(null);
+    };
   }, []);
 
   const addLog = useCallback((message: string, type: 'info' | 'error' | 'system' = 'info') => {
@@ -139,6 +154,29 @@ const App: React.FC = () => {
     }
   };
 
+  const handleConfirmYes = async () => {
+    setConfirmDialog({ show: false, message: '', action: '' });
+    try {
+      addLog('Force killing process...', 'system');
+      await forceKillProcess();
+      setRunningAppId(null);
+      setStatus(AppStatus.STOPPED);
+    } catch (error: any) {
+      addLog(`Error force killing: ${error.message}`, 'error');
+    }
+  };
+
+  const handleConfirmNo = () => {
+    setConfirmDialog({ show: false, message: '', action: '' });
+    addLog('Force kill cancelled. Process remains running.', 'system');
+    // Reset status since we didn't complete the operation
+    if (runningAppId) {
+      setStatus(AppStatus.RUNNING);
+    } else {
+      setStatus(AppStatus.STOPPED);
+    }
+  };
+
   const selectedApp = useMemo(() => apps.find(a => a.id === selectedAppId), [apps, selectedAppId]);
 
   // START button is enabled when: not busy AND (nothing running OR selected app is different from running)
@@ -159,7 +197,31 @@ const App: React.FC = () => {
 
   return (
     <div className="relative h-[100dvh] w-full bg-slate-950 text-white overflow-hidden flex flex-col">
-      
+
+      {/* Confirmation Dialog */}
+      {confirmDialog.show && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 mx-4 max-w-md shadow-2xl">
+            <h2 className="text-lg font-bold text-white mb-3">Confirmation Required</h2>
+            <p className="text-slate-300 mb-6">{confirmDialog.message}</p>
+            <div className="flex gap-4 justify-end">
+              <button
+                onClick={handleConfirmNo}
+                className="px-5 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white font-medium transition-colors"
+              >
+                No
+              </button>
+              <button
+                onClick={handleConfirmYes}
+                className="px-5 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white font-medium transition-colors"
+              >
+                Yes, Force Kill
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Scrollable Content Area */}
       {/* We use min-h-full inside the scroll container to ensure flex alignment works */}
       <div className="flex-1 overflow-y-auto overflow-x-hidden w-full">

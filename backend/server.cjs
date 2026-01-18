@@ -37,15 +37,67 @@ function sendSSE(data) {
   });
 }
 
-function killPort4000() {
+// Check if port 4000 is in use
+function isPort4000InUse() {
   return new Promise((resolve) => {
     if (isWindows) {
-      // Windows: find and kill process on port 4000
+      exec('netstat -aon | findstr :4000 | findstr LISTENING', { shell: 'cmd.exe' }, (error, stdout) => {
+        resolve(stdout && stdout.trim().length > 0);
+      });
+    } else {
+      exec('lsof -ti:4000', (error, stdout) => {
+        resolve(stdout && stdout.trim().length > 0);
+      });
+    }
+  });
+}
+
+// Send graceful termination signal to port 4000
+function sendGracefulTermination() {
+  return new Promise((resolve) => {
+    if (isWindows) {
+      exec('for /f "tokens=5" %a in (\'netstat -aon ^| findstr :4000 ^| findstr LISTENING\') do taskkill /PID %a', { shell: 'cmd.exe' }, () => resolve());
+    } else {
+      exec('lsof -ti:4000 | xargs kill -15 2>/dev/null || true', () => resolve());
+    }
+  });
+}
+
+// Graceful shutdown: poll until port is free, ask for confirmation before force kill
+async function killPort4000Graceful(maxAttempts = 10, pollInterval = 500) {
+  // Check if port is even in use
+  if (!(await isPort4000InUse())) {
+    return true;
+  }
+
+  // Send graceful termination signal
+  await sendGracefulTermination();
+
+  // Poll until port is free
+  for (let i = 0; i < maxAttempts; i++) {
+    await sleep(pollInterval);
+    if (!(await isPort4000InUse())) {
+      return true; // Port is free, done
+    }
+  }
+
+  // Still in use after polling, ask for confirmation
+  sendSSE({
+    type: 'confirm',
+    message: 'Process on port 4000 did not stop gracefully. Force kill?',
+    action: 'force_kill_port'
+  });
+  return false; // Indicates force kill is needed but not done
+}
+
+// Force kill immediately (for manual override)
+function killPort4000Force() {
+  return new Promise((resolve) => {
+    if (isWindows) {
       exec('for /f "tokens=5" %a in (\'netstat -aon ^| findstr :4000 ^| findstr LISTENING\') do taskkill /F /PID %a', { shell: 'cmd.exe' }, (error) => {
         resolve();
       });
     } else {
-      // Unix/Mac
       exec('lsof -ti:4000 | xargs kill -9 2>/dev/null || true', (error) => {
         resolve();
       });
@@ -58,15 +110,40 @@ function sleep(ms) {
 }
 
 async function startApp(appId, startCommand, folderPath) {
-  // If there's a current process, kill it
+  // If there's a current process, kill it gracefully
   if (currentProcess) {
-    currentProcess.kill('SIGTERM');
+    sendSSE({ type: 'system', message: 'Stopping previous app gracefully...' });
+    currentProcess.kill('SIGINT'); // Ctrl+C signal for graceful shutdown
+
+    // Poll until process exits (up to 10 attempts, 500ms each = 5 seconds max)
+    const maxAttempts = 10;
+    for (let i = 0; i < maxAttempts && currentProcess; i++) {
+      await sleep(500);
+    }
+
+    // If still running, ask for confirmation
+    if (currentProcess) {
+      sendSSE({
+        type: 'confirm',
+        message: 'Previous app did not stop gracefully. Force kill?',
+        action: 'force_kill_process'
+      });
+      // Don't proceed with starting new app
+      return { needsConfirmation: true, reason: 'process_running' };
+    }
+
     currentProcess = null;
     currentAppId = null;
   }
 
-  // Kill any existing process on port 4000
-  await killPort4000();
+  // Kill any existing process on port 4000 gracefully
+  sendSSE({ type: 'system', message: 'Clearing port 4000...' });
+  const portCleared = await killPort4000Graceful();
+
+  if (!portCleared) {
+    // Port didn't clear, confirmation was requested
+    return { needsConfirmation: true, reason: 'port_in_use' };
+  }
 
   // Wait for port to be fully released
   await sleep(500);
@@ -157,14 +234,34 @@ async function startApp(appId, startCommand, folderPath) {
 
 async function stopApp() {
   if (currentProcess) {
-    sendSSE({ type: 'system', message: 'Stopping current process...' });
-    currentProcess.kill('SIGTERM');
+    sendSSE({ type: 'system', message: 'Stopping application gracefully...' });
+    currentProcess.kill('SIGINT'); // Ctrl+C signal
+
+    // Poll until process exits (up to 10 attempts, 500ms each = 5 seconds max)
+    const maxAttempts = 10;
+    for (let i = 0; i < maxAttempts && currentProcess; i++) {
+      await sleep(500);
+    }
+
+    // If still running, ask for confirmation
+    if (currentProcess) {
+      sendSSE({
+        type: 'confirm',
+        message: 'Application did not stop gracefully. Force kill?',
+        action: 'force_kill_process'
+      });
+      return { needsConfirmation: true };
+    }
+
     currentProcess = null;
     currentAppId = null;
   }
 
-  await killPort4000();
-  sendSSE({ type: 'system', message: 'Application stopped. Port 4000 is free.' });
+  const portCleared = await killPort4000Graceful();
+  if (portCleared) {
+    sendSSE({ type: 'system', message: 'Application stopped. Port 4000 is free.' });
+  }
+  return { needsConfirmation: !portCleared };
 }
 
 function parseBody(req) {
@@ -218,10 +315,43 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Kill port 4000
+  // Kill port 4000 (graceful by default, force with ?force=true)
   if (url.pathname === '/api/kill-port' && req.method === 'POST') {
     try {
-      await killPort4000();
+      const forceKill = url.searchParams.get('force') === 'true';
+      if (forceKill) {
+        sendSSE({ type: 'system', message: 'Force killing process on port 4000...' });
+        await killPort4000Force();
+        sendSSE({ type: 'system', message: 'Port 4000 cleared.' });
+      } else {
+        const cleared = await killPort4000Graceful();
+        if (cleared) {
+          sendSSE({ type: 'system', message: 'Port 4000 cleared.' });
+        }
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true }));
+    } catch (error) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, error: error.message }));
+    }
+    return;
+  }
+
+  // Force kill current process (for confirmation flow)
+  if (url.pathname === '/api/force-kill-process' && req.method === 'POST') {
+    try {
+      if (currentProcess) {
+        sendSSE({ type: 'system', message: 'Force killing current process...' });
+        currentProcess.kill('SIGKILL');
+        await sleep(200);
+        currentProcess = null;
+        currentAppId = null;
+        sendSSE({ type: 'system', message: 'Process killed.' });
+      }
+      // Also force kill anything on port 4000
+      await killPort4000Force();
+      sendSSE({ type: 'system', message: 'Port 4000 cleared.' });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: true }));
     } catch (error) {
@@ -244,9 +374,14 @@ const server = http.createServer(async (req, res) => {
       const startCommand = body.startCommand || 'npm run dev';
       const folderPath = body.folderPath || `../${body.appId}`;
 
-      await startApp(body.appId, startCommand, folderPath);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true }));
+      const result = await startApp(body.appId, startCommand, folderPath);
+      if (result && result.needsConfirmation) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, needsConfirmation: true, reason: result.reason }));
+      } else {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+      }
     } catch (error) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: false, error: error.message }));
@@ -257,9 +392,12 @@ const server = http.createServer(async (req, res) => {
   // Stop app
   if (url.pathname === '/api/stop' && req.method === 'POST') {
     try {
-      await stopApp();
+      const result = await stopApp();
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ success: true }));
+      res.end(JSON.stringify({
+        success: !result.needsConfirmation,
+        needsConfirmation: result.needsConfirmation || false
+      }));
     } catch (error) {
       res.writeHead(500, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ success: false, error: error.message }));
